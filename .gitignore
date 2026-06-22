@@ -1,0 +1,14 @@
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/dev-server*.log
+.env
+frontend/.env
+.pytest_cache/
+__pycache__/
+*.pyc
+artifacts/
+deployments/*.local.json
+deployments/*.real.json
+coverage/
+MISSIONMESH_MASTER_BUILD_PROMPT_GENLAYER_STUDIO.txt

@@ -1,0 +1,29 @@
+{
+  "name": "missionmesh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspace frontend && tsc -p tsconfig.scripts.json --noEmit",
+    "lint": "npm run lint --workspace frontend",
+    "test": "python -m pytest tests/direct -v && npm run test --workspace frontend",
+    "test:direct": "python -m pytest tests/direct -v",
+    "test:integration": "gltest tests\\integration -v -s --network studionet",
+    "build": "npm run build --workspace frontend",
+    "deploy:studionet": "tsx scripts/deploy-studionet.ts",
+    "verify:studionet": "tsx scripts/verify-studionet.ts",
+    "smoke:studionet": "tsx scripts/smoke-test-studionet.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "genlayer-js": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.0"
+  }
+}

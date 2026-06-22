@@ -1,0 +1,12 @@
+networks:
+  default: localnet
+  localnet:
+  studionet:
+    url: https://studio.genlayer.com/api
+    chain_type: studionet
+    default_wait_interval: 3000
+    default_wait_retries: 50
+paths:
+  contracts: contracts
+  artifacts: artifacts
+environment: .env

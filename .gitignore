@@ -12,3 +12,5 @@ deployments/*.local.json
 deployments/*.real.json
 coverage/
 MISSIONMESH_MASTER_BUILD_PROMPT_GENLAYER_STUDIO.txt
+
+.vercel

@@ -251,28 +251,56 @@ export default function App() {
     setMissionIdInput(String(missionData.id));
   }, []);
 
+  const readProtocolConfig = useCallback(async (target: Address): Promise<ProtocolConfig> => {
+    const raw = await readContract<string>(target, "get_protocol_config");
+    return parseJson<ProtocolConfig>(raw, {
+      owner: "",
+      minimum_mission_budget: 0,
+      protocol_fee_bps: 0,
+      maximum_protocol_fee_bps: 500,
+      next_mission_id: 1,
+      next_task_id: 1,
+      protocol_fees: 0,
+    });
+  }, []);
+
+  const loadLatestMissionForConfig = useCallback(
+    async (target: Address, config: ProtocolConfig): Promise<number> => {
+      const latestMissionId = Number(config.next_mission_id) - 1;
+      if (!Number.isFinite(latestMissionId) || latestMissionId <= 0) {
+        setMission(null);
+        setTasks([]);
+        setSelectedTaskId(0);
+        setMissionIdInput("1");
+        return 0;
+      }
+      const { mission: missionData, tasks: loadedTasks } = await fetchMissionState(target, latestMissionId);
+      applyMissionState(missionData, loadedTasks);
+      return loadedTasks.length;
+    },
+    [applyMissionState, fetchMissionState]
+  );
+
   const loadProtocol = useCallback(async () => {
     const target = requireAddress();
     setBusy("protocol");
     try {
-      const raw = await readContract<string>(target, "get_protocol_config");
-      const config = parseJson<ProtocolConfig>(raw, {
-        owner: "",
-        minimum_mission_budget: 0,
-        protocol_fee_bps: 0,
-        maximum_protocol_fee_bps: 500,
-        next_mission_id: 1,
-        next_task_id: 1,
-        protocol_fees: 0,
-      });
+      const config = await readProtocolConfig(target);
       setProtocol(config);
-      showNotice("success", "Protocol configuration loaded from Studionet.");
+      const taskCount = await loadLatestMissionForConfig(target, config);
+      const latestMissionId = Number(config.next_mission_id) - 1;
+      showNotice(
+        "success",
+        latestMissionId > 0
+          ? `Protocol loaded. Latest mission ${latestMissionId} loaded with ${taskCount} tasks.`
+          : "Protocol loaded. No missions found yet."
+      );
     } catch (error) {
       showNotice("error", error instanceof Error ? error.message : "Could not load protocol config.");
     } finally {
       setBusy("");
     }
-  }, [requireAddress, showNotice]);
+  }, [loadLatestMissionForConfig, readProtocolConfig, requireAddress, showNotice]);
 
   const loadMission = useCallback(
     async (missionIdRaw?: string) => {
@@ -362,9 +390,30 @@ export default function App() {
     }
   };
 
-  const saveAddress = () => {
+  const saveAddress = async () => {
     window.localStorage.setItem("missionmesh.address", contractAddress.trim());
-    showNotice("success", "Contract address saved locally.");
+    if (!contractReady) {
+      showNotice("success", "Contract address saved locally.");
+      return;
+    }
+    const target = requireAddress();
+    setBusy("address");
+    try {
+      const config = await readProtocolConfig(target);
+      setProtocol(config);
+      const taskCount = await loadLatestMissionForConfig(target, config);
+      const latestMissionId = Number(config.next_mission_id) - 1;
+      showNotice(
+        "success",
+        latestMissionId > 0
+          ? `Contract saved. Latest mission ${latestMissionId} loaded with ${taskCount} tasks.`
+          : "Contract saved. No missions found yet. Create a mission to generate the task plan."
+      );
+    } catch (error) {
+      showNotice("error", error instanceof Error ? error.message : "Contract saved, but protocol state could not be loaded.");
+    } finally {
+      setBusy("");
+    }
   };
 
   const fillDemoMission = () => {
@@ -439,16 +488,7 @@ export default function App() {
     const target = requireAddress();
     setBusy("create_mission");
     try {
-      const configRaw = await readContract<string>(target, "get_protocol_config");
-      const config = parseJson<ProtocolConfig>(configRaw, {
-        owner: "",
-        minimum_mission_budget: 0,
-        protocol_fee_bps: 0,
-        maximum_protocol_fee_bps: 500,
-        next_mission_id: Number(missionIdInput || "1"),
-        next_task_id: 1,
-        protocol_fees: 0,
-      });
+      const config = await readProtocolConfig(target);
       setProtocol(config);
       const expectedMissionId = config.next_mission_id;
       const hash = await writeContract(account, target, "create_mission", [goal, constraints, deadlineSeconds], budget);
@@ -609,7 +649,7 @@ export default function App() {
           <span>MissionMesh contract</span>
           <input value={contractAddress} onChange={(event) => setContractAddress(event.target.value)} placeholder="0x..." />
         </label>
-        <button className="iconButton" onClick={saveAddress} title="Save address">
+        <button className="iconButton" onClick={saveAddress} disabled={busy !== ""} title="Save address">
           <Download />
         </button>
         <label>

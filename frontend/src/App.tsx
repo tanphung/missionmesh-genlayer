@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ArrowRight,
   BadgeCheck,
-  Bolt,
   Braces,
   Bug,
   CheckCircle2,
@@ -19,6 +18,7 @@ import {
   Send,
   ShieldCheck,
   UserRound,
+  Wand2,
   Wallet,
 } from "lucide-react";
 import {
@@ -118,11 +118,16 @@ const emptyTask: Task = {
   accepted_artifact_urls: [],
 };
 
-const defaultGoal =
-  "Build and launch a responsive landing page for an AI scheduling assistant with public research notes, final copy, a design artifact, source repository, live deployment, and compact launch kit.";
+const demoMissionGoal =
+  "Launch a public beta for AtlasOps, an AI-assisted operations dashboard for small logistics teams. The mission should produce market research, product positioning, a clickable UX prototype, a working responsive landing page, QA evidence, deployment notes, and a concise launch checklist for the founding team.";
 
-const defaultConstraints =
-  "Deadline is seven days. Deliverables must use public URLs and avoid private credentials. The final integration task must verify desktop and mobile readiness.";
+const demoMissionConstraints =
+  "Use English for all customer-facing copy. Keep the first release focused on shipment delay alerts, team handoff notes, and daily operations summaries. Deliver every artifact as a public URL. Do not include private credentials, paid API keys, or customer data. The final integration task must verify desktop and mobile readiness, link the source repository, link the live deployment, and summarize remaining risks.";
+
+function demoDeadlineValue(): string {
+  const date = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+  return date.toISOString().slice(0, 16);
+}
 
 const DEPLOYED_MISSION_MESH_ADDRESS = "0x144949Aa034c5f20f25Be57f7b5f2cc4964c5501" as Address;
 const initialContractAddress = (import.meta.env.VITE_MISSION_MESH_ADDRESS || DEPLOYED_MISSION_MESH_ADDRESS) as Address;
@@ -192,13 +197,10 @@ export default function App() {
   const [txs, setTxs] = useState<TxEntry[]>([]);
   const [trace, setTrace] = useState("");
 
-  const [goal, setGoal] = useState(defaultGoal);
-  const [constraints, setConstraints] = useState(defaultConstraints);
-  const [deadline, setDeadline] = useState(() => {
-    const date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    return date.toISOString().slice(0, 16);
-  });
-  const [budgetWei, setBudgetWei] = useState("1000000000000000000");
+  const [goal, setGoal] = useState("");
+  const [constraints, setConstraints] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [budgetWei, setBudgetWei] = useState("");
   const [missionIdInput, setMissionIdInput] = useState("1");
 
   const [proposal, setProposal] = useState("I will complete this task using public artifacts, clear handoff notes, and evidence URLs that map to each acceptance criterion.");
@@ -364,6 +366,14 @@ export default function App() {
     showNotice("success", "Contract address saved locally.");
   };
 
+  const fillDemoMission = () => {
+    setGoal(demoMissionGoal);
+    setConstraints(demoMissionConstraints);
+    setDeadline(demoDeadlineValue());
+    setBudgetWei("1000000000000000000");
+    showNotice("success", "Demo mission details filled.");
+  };
+
   const runTx = async (label: string, functionName: string, args: unknown[], value = 0n, after?: (receipt: unknown) => Promise<void> | void) => {
     if (!account) {
       showNotice("error", "Connect a wallet before sending a transaction.");
@@ -396,8 +406,30 @@ export default function App() {
   };
 
   const createMission = async () => {
+    if (!goal.trim()) {
+      showNotice("error", "Enter a mission goal or use Fill demo.");
+      return;
+    }
+    if (!constraints.trim()) {
+      showNotice("error", "Enter constraints and resource links or use Fill demo.");
+      return;
+    }
     const deadlineSeconds = toUnixSeconds(deadline);
-    const budget = BigInt(budgetWei || "0");
+    if (deadlineSeconds <= 0n) {
+      showNotice("error", "Choose a valid mission deadline or use Fill demo.");
+      return;
+    }
+    let budget = 0n;
+    try {
+      budget = BigInt(budgetWei || "0");
+    } catch {
+      showNotice("error", "Enter a valid numeric mission budget in wei or use Fill demo.");
+      return;
+    }
+    if (budget <= 0n) {
+      showNotice("error", "Enter a mission budget in wei or use Fill demo.");
+      return;
+    }
     await runTx("Create mission", "create_mission", [goal, constraints, deadlineSeconds], budget, async (receipt) => {
       const returned = getReceiptReturn(receipt);
       const nextIdFallback = protocol?.next_mission_id ?? Number(missionIdInput || "1");
@@ -562,15 +594,17 @@ export default function App() {
               <p className="eyebrow">Creator</p>
               <h2>Create a funded mission</h2>
             </div>
-            <Bolt />
+            <button className="iconButton" onClick={fillDemoMission} disabled={busy !== ""} title="Fill demo mission">
+              <Wand2 />
+            </button>
           </div>
           <label>
             <span>Mission goal</span>
-            <textarea value={goal} onChange={(event) => setGoal(event.target.value)} rows={5} />
+            <textarea value={goal} onChange={(event) => setGoal(event.target.value)} rows={5} placeholder="Describe the outcome the mission should coordinate." />
           </label>
           <label>
             <span>Constraints and resource links</span>
-            <textarea value={constraints} onChange={(event) => setConstraints(event.target.value)} rows={4} />
+            <textarea value={constraints} onChange={(event) => setConstraints(event.target.value)} rows={4} placeholder="Add requirements, links, risks, and delivery rules." />
           </label>
           <div className="twoCol">
             <label>
@@ -579,9 +613,13 @@ export default function App() {
             </label>
             <label>
               <span>Budget wei</span>
-              <input value={budgetWei} onChange={(event) => setBudgetWei(event.target.value)} inputMode="numeric" />
+              <input value={budgetWei} onChange={(event) => setBudgetWei(event.target.value)} inputMode="numeric" placeholder="1000000000000000000" />
             </label>
           </div>
+          <button className="secondaryButton wide" onClick={fillDemoMission} disabled={busy !== ""}>
+            <Wand2 />
+            Fill demo
+          </button>
           <button className="primaryButton wide" onClick={createMission} disabled={!contractReady || !account || busy !== ""}>
             {busy === "create_mission" ? <Loader2 className="spin" /> : <Send />}
             Create mission

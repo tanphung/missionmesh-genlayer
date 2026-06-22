@@ -28,6 +28,8 @@ export const GENLAYER_NETWORK = {
 };
 
 const makeClient = createClient as unknown as (config: Record<string, unknown>) => any;
+const RECEIPT_RETRIES = 200;
+const RECEIPT_INTERVAL_MS = 3000;
 
 const discoveredWallets: EIP6963ProviderDetail[] = [];
 
@@ -189,12 +191,13 @@ export async function writeContract(
   })) as TxHash;
 }
 
-export async function waitForFinalized(hash: TxHash) {
+export async function waitForAccepted(hash: TxHash) {
   return readClient.waitForTransactionReceipt({
     hash,
-    status: TransactionStatus.FINALIZED,
-    fullTransaction: false
-  });
+    status: TransactionStatus.ACCEPTED,
+    interval: RECEIPT_INTERVAL_MS,
+    retries: RECEIPT_RETRIES
+  } as Record<string, unknown>);
 }
 
 export async function debugTrace(hash: TxHash) {
@@ -202,7 +205,57 @@ export async function debugTrace(hash: TxHash) {
 }
 
 export function executionSucceeded(receipt: any): boolean {
-  return receipt?.txExecutionResultName === ExecutionResult.FINISHED_WITH_RETURN;
+  const statusNameByNumber: Record<string, string> = {
+    "5": "ACCEPTED",
+    "6": "UNDETERMINED",
+    "7": "FINALIZED",
+    "8": "CANCELED",
+    "12": "VALIDATORS_TIMEOUT",
+    "13": "LEADER_TIMEOUT"
+  };
+  const statusName = String(
+    receipt?.statusName ?? receipt?.status_name ?? statusNameByNumber[String(receipt?.status)] ?? ""
+  ).toUpperCase();
+  if (["UNDETERMINED", "CANCELED", "VALIDATORS_TIMEOUT", "LEADER_TIMEOUT"].includes(statusName)) {
+    return false;
+  }
+
+  const resultNameByNumber: Record<string, string> = {
+    "1": "AGREE",
+    "2": "DISAGREE",
+    "3": "TIMEOUT",
+    "4": "DETERMINISTIC_VIOLATION",
+    "5": "NO_MAJORITY",
+    "6": "MAJORITY_AGREE",
+    "7": "MAJORITY_DISAGREE"
+  };
+  const resultName = String(
+    receipt?.resultName ?? receipt?.result_name ?? resultNameByNumber[String(receipt?.result)] ?? ""
+  ).toUpperCase();
+  if (["DISAGREE", "TIMEOUT", "DETERMINISTIC_VIOLATION", "NO_MAJORITY", "MAJORITY_DISAGREE"].includes(resultName)) {
+    return false;
+  }
+
+  const executionResult = String(
+    receipt?.txExecutionResultName ??
+      receipt?.tx_execution_result_name ??
+      receipt?.executionResultName ??
+      receipt?.execution_result_name ??
+      receipt?.executionResult?.name ??
+      ""
+  ).toUpperCase();
+  if (executionResult.includes("ERROR") || executionResult.includes("FAIL") || executionResult.includes("REVERT")) {
+    return false;
+  }
+
+  return (
+    statusName === "ACCEPTED" ||
+    statusName === "FINALIZED" ||
+    resultName === "AGREE" ||
+    resultName === "MAJORITY_AGREE" ||
+    resultName === "SUCCESS" ||
+    receipt?.txExecutionResultName === ExecutionResult.FINISHED_WITH_RETURN
+  );
 }
 
 export function explorerTxUrl(hash: string): string {

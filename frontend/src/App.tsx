@@ -33,7 +33,7 @@ import {
   isWalletInstalled,
   readContract,
   subscribeToWalletDiscovery,
-  waitForFinalized,
+  waitForAccepted,
   writeContract,
 } from "./lib/genlayer";
 import {
@@ -56,7 +56,7 @@ interface Notice {
 interface TxEntry {
   hash: TxHash;
   label: string;
-  status: "submitted" | "finalized" | "failed";
+  status: "submitted" | "accepted" | "failed";
   ok?: boolean;
   detail?: string;
 }
@@ -370,7 +370,7 @@ export default function App() {
     setGoal(demoMissionGoal);
     setConstraints(demoMissionConstraints);
     setDeadline(demoDeadlineValue());
-    setBudgetWei("1000000000000000000");
+    setBudgetWei("1000000");
     showNotice("success", "Demo mission details filled.");
   };
 
@@ -384,20 +384,20 @@ export default function App() {
     try {
       const hash = await writeContract(account, target, functionName, args, value);
       addTx({ hash, label, status: "submitted" });
-      showNotice("info", `${label} submitted. Waiting for FINALIZED.`);
-      const receipt = await waitForFinalized(hash);
+      showNotice("info", `${label} submitted. Waiting for ACCEPTED.`);
+      const receipt = await waitForAccepted(hash);
       const ok = executionSucceeded(receipt);
       updateTx(hash, {
-        status: ok ? "finalized" : "failed",
+        status: ok ? "accepted" : "failed",
         ok,
         detail: receiptDetail(receipt),
       });
       if (!ok) {
-        showNotice("error", `${label} finalized without a success result. Inspect the trace.`);
+        showNotice("error", `${label} was accepted with a failed result. Inspect the trace.`);
         return;
       }
       await after?.(receipt);
-      showNotice("success", `${label} finalized successfully.`);
+      showNotice("success", `${label} accepted successfully.`);
     } catch (error) {
       showNotice("error", error instanceof Error ? error.message : `${label} failed.`);
     } finally {
@@ -613,7 +613,7 @@ export default function App() {
             </label>
             <label>
               <span>Budget wei</span>
-              <input value={budgetWei} onChange={(event) => setBudgetWei(event.target.value)} inputMode="numeric" placeholder="1000000000000000000" />
+              <input value={budgetWei} onChange={(event) => setBudgetWei(event.target.value)} inputMode="numeric" placeholder="1000000" />
             </label>
           </div>
           <button className="secondaryButton wide" onClick={fillDemoMission} disabled={busy !== ""}>

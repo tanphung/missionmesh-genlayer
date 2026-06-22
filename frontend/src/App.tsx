@@ -77,6 +77,11 @@ interface TaskContext {
   current_revision_feedback?: string;
 }
 
+interface MissionState {
+  mission: Mission;
+  tasks: Task[];
+}
+
 const emptyMission: Mission = {
   id: 0,
   creator: "",
@@ -162,20 +167,7 @@ function receiptDetail(receipt: unknown): string {
   return `Result: ${String(result)}`;
 }
 
-function getReceiptReturn(receipt: unknown): unknown {
-  const raw = receipt as Record<string, unknown>;
-  const candidates = [
-    raw?.result,
-    raw?.returnValue,
-    raw?.return_value,
-    raw?.data,
-    raw?.transaction?.["result" as keyof object],
-  ];
-  for (const candidate of candidates) {
-    if (candidate !== undefined && candidate !== null) return candidate;
-  }
-  return undefined;
-}
+const sleepMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default function App() {
   const [contractAddress, setContractAddress] = useState<string>(() => {
@@ -236,6 +228,29 @@ export default function App() {
     return asAddress(address);
   }, [address, contractReady]);
 
+  const fetchMissionState = useCallback(async (target: Address, missionId: number): Promise<MissionState> => {
+    const [missionRaw, idsRaw] = await Promise.all([
+      readContract<string>(target, "get_mission", [BigInt(missionId)]),
+      readContract<string>(target, "get_mission_task_ids", [BigInt(missionId)]),
+    ]);
+    const missionData = parseJson<Mission>(missionRaw, { ...emptyMission, id: missionId });
+    const taskIds = parseJson<number[]>(idsRaw, []);
+    const loadedTasks = await Promise.all(
+      taskIds.map(async (taskId) => {
+        const raw = await readContract<string>(target, "get_task", [BigInt(taskId)]);
+        return parseJson<Task>(raw, { ...emptyTask, id: taskId, mission_id: missionId });
+      })
+    );
+    return { mission: missionData, tasks: loadedTasks };
+  }, []);
+
+  const applyMissionState = useCallback((missionData: Mission, loadedTasks: Task[]) => {
+    setMission(missionData);
+    setTasks(loadedTasks);
+    setSelectedTaskId((current) => (loadedTasks.some((task) => task.id === current) ? current : loadedTasks[0]?.id ?? 0));
+    setMissionIdInput(String(missionData.id));
+  }, []);
+
   const loadProtocol = useCallback(async () => {
     const target = requireAddress();
     setBusy("protocol");
@@ -269,22 +284,8 @@ export default function App() {
       }
       setBusy("mission");
       try {
-        const [missionRaw, idsRaw] = await Promise.all([
-          readContract<string>(target, "get_mission", [BigInt(missionId)]),
-          readContract<string>(target, "get_mission_task_ids", [BigInt(missionId)]),
-        ]);
-        const missionData = parseJson<Mission>(missionRaw, { ...emptyMission, id: missionId });
-        const taskIds = parseJson<number[]>(idsRaw, []);
-        const loadedTasks = await Promise.all(
-          taskIds.map(async (taskId) => {
-            const raw = await readContract<string>(target, "get_task", [BigInt(taskId)]);
-            return parseJson<Task>(raw, { ...emptyTask, id: taskId, mission_id: missionId });
-          })
-        );
-        setMission(missionData);
-        setTasks(loadedTasks);
-        setSelectedTaskId((current) => (loadedTasks.some((task) => task.id === current) ? current : loadedTasks[0]?.id ?? 0));
-        setMissionIdInput(String(missionId));
+        const { mission: missionData, tasks: loadedTasks } = await fetchMissionState(target, missionId);
+        applyMissionState(missionData, loadedTasks);
         showNotice("success", `Mission ${missionId} loaded with ${loadedTasks.length} tasks.`);
       } catch (error) {
         showNotice("error", error instanceof Error ? error.message : "Could not load mission.");
@@ -292,7 +293,7 @@ export default function App() {
         setBusy("");
       }
     },
-    [missionIdInput, requireAddress, showNotice]
+    [applyMissionState, fetchMissionState, missionIdInput, requireAddress, showNotice]
   );
 
   const loadTaskContext = useCallback(
@@ -406,6 +407,10 @@ export default function App() {
   };
 
   const createMission = async () => {
+    if (!account) {
+      showNotice("error", "Connect a wallet before sending a transaction.");
+      return;
+    }
     if (!goal.trim()) {
       showNotice("error", "Enter a mission goal or use Fill demo.");
       return;
@@ -430,14 +435,52 @@ export default function App() {
       showNotice("error", "Enter a mission budget in wei or use Fill demo.");
       return;
     }
-    await runTx("Create mission", "create_mission", [goal, constraints, deadlineSeconds], budget, async (receipt) => {
-      const returned = getReceiptReturn(receipt);
-      const nextIdFallback = protocol?.next_mission_id ?? Number(missionIdInput || "1");
-      const missionId = Number(typeof returned === "bigint" ? returned : String(returned ?? nextIdFallback));
-      const safeMissionId = Number.isFinite(missionId) && missionId > 0 ? missionId : nextIdFallback;
-      await loadMission(String(safeMissionId));
-      await loadProtocol();
-    });
+
+    const target = requireAddress();
+    setBusy("create_mission");
+    try {
+      const configRaw = await readContract<string>(target, "get_protocol_config");
+      const config = parseJson<ProtocolConfig>(configRaw, {
+        owner: "",
+        minimum_mission_budget: 0,
+        protocol_fee_bps: 0,
+        maximum_protocol_fee_bps: 500,
+        next_mission_id: Number(missionIdInput || "1"),
+        next_task_id: 1,
+        protocol_fees: 0,
+      });
+      setProtocol(config);
+      const expectedMissionId = config.next_mission_id;
+      const hash = await writeContract(account, target, "create_mission", [goal, constraints, deadlineSeconds], budget);
+      addTx({ hash, label: "Create mission", status: "submitted", detail: `Waiting for mission ${expectedMissionId}` });
+      showNotice("info", `Create mission submitted. Waiting for mission ${expectedMissionId} to appear.`);
+
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        await sleepMs(3000);
+        try {
+          const { mission: missionData, tasks: loadedTasks } = await fetchMissionState(target, expectedMissionId);
+          if (missionData.id === expectedMissionId && loadedTasks.length > 0) {
+            applyMissionState(missionData, loadedTasks);
+            updateTx(hash, {
+              status: "accepted",
+              ok: true,
+              detail: `Mission ${expectedMissionId} loaded with ${loadedTasks.length} tasks`,
+            });
+            await loadProtocol();
+            showNotice("success", `Mission ${expectedMissionId} created with ${loadedTasks.length} tasks.`);
+            return;
+          }
+        } catch {
+          // GenLayer Studio may expose state a few seconds after the wallet transaction.
+        }
+      }
+
+      showNotice("error", `Transaction was submitted, but mission ${expectedMissionId} was not readable yet. Use Load mission to retry.`);
+    } catch (error) {
+      showNotice("error", error instanceof Error ? error.message : "Create mission failed.");
+    } finally {
+      setBusy("");
+    }
   };
 
   const claimTask = async () => {

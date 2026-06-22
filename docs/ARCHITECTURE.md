@@ -2,7 +2,7 @@
 
 Storage Test: 0x15642036Fdb1D2214507d8025b928e137A184723
 MissionMesh: 0x144949Aa034c5f20f25Be57f7b5f2cc4964c5501
-Live App: NOT DEPLOYED
+Live App: https://missionmesh-genlayer.vercel.app
 Demo Video: NOT RECORDED
 
 ## Components

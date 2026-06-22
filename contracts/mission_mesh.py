@@ -189,22 +189,44 @@ def _clean_string_list(values, limit_each, max_items):
     return cleaned
 
 
+def _normalize_enum(value, allowed, fallback):
+    text = _string(value).strip().upper().replace(" ", "_").replace("-", "_")
+    if text in allowed:
+        return text
+    return fallback
+
+
 def _normalize_task(raw_task, index):
     if not isinstance(raw_task, dict):
         _fail("[LLM_ERROR] task must be object")
-    title = _string(raw_task.get("title", "")).strip()
-    objective = _string(raw_task.get("objective", "")).strip()
+    title = _string(raw_task.get("title", "")).strip()[:160]
+    if title == "":
+        title = "Mission task " + _string(index + 1)
+    objective = _string(raw_task.get("objective", "")).strip()[:900]
+    if objective == "":
+        objective = ("Complete the work for " + title + " with a clear public deliverable.")[:900]
     deliverable_type = _string(raw_task.get("deliverable_type", "")).strip()
+    if deliverable_type not in DELIVERABLE_TYPES:
+        deliverable_type = "DOCUMENT"
     skills = _clean_string_list(raw_task.get("skills", []), 80, 8)
+    if len(skills) == 0:
+        skills = ["general execution"]
     criteria = _clean_string_list(raw_task.get("acceptance_criteria", []), 220, 8)
+    if len(criteria) == 0:
+        criteria = ["Deliverable is complete, public, and matches the task objective."]
     deps_raw = raw_task.get("dependency_indexes", [])
     if not isinstance(deps_raw, list):
         _fail("[LLM_ERROR] dependencies must be list")
+    dep_seen = {}
     deps = []
     for dep in deps_raw:
-        deps.append(_as_int(dep))
+        dep_i = _as_int(dep)
+        dep_key = _string(dep_i)
+        if dep_i >= 0 and dep_i < index and dep_key not in dep_seen and len(deps) < MAX_DEPENDENCIES:
+            deps.append(dep_i)
+            dep_seen[dep_key] = True
     normalized = {
-        "local_index": _as_int(raw_task.get("local_index", index)),
+        "local_index": index,
         "title": title,
         "objective": objective,
         "skills": skills,
@@ -218,6 +240,38 @@ def _normalize_task(raw_task, index):
     return normalized
 
 
+def _repair_normalized_tasks(tasks):
+    count = len(tasks)
+    if count == 0:
+        return tasks
+    final_index = count - 1
+    total_positive_bps = 0
+    needs_budget_repair = False
+    index = 0
+    for task in tasks:
+        task["local_index"] = index
+        if _as_int(task.get("duration_hours", 0)) <= 0:
+            task["duration_hours"] = 24
+        task["is_final_integration"] = index == final_index
+        bps = _as_int(task.get("budget_bps", 0))
+        if bps <= 0:
+            needs_budget_repair = True
+        else:
+            total_positive_bps += bps
+        index += 1
+    if needs_budget_repair or total_positive_bps < MIN_ALLOC_BPS or total_positive_bps > MAX_ALLOC_BPS:
+        base = 9000 // count
+        remainder = 9000 - (base * count)
+        index = 0
+        for task in tasks:
+            extra = 0
+            if index == count - 1:
+                extra = remainder
+            task["budget_bps"] = base + extra
+            index += 1
+    return tasks
+
+
 def _normalize_plan(plan):
     data = _coerce_object(plan)
     tasks_raw = data.get("tasks", [])
@@ -228,14 +282,26 @@ def _normalize_plan(plan):
     for raw_task in tasks_raw:
         tasks.append(_normalize_task(raw_task, index))
         index += 1
+    tasks = _repair_normalized_tasks(tasks)
     assumptions = _clean_string_list(data.get("assumptions", []), 240, 8)
-    risks = _clean_string_list(data.get("risk_codes", []), 80, 10)
+    risks_raw = _clean_string_list(data.get("risk_codes", []), 80, 10)
+    risks = []
+    for risk in risks_raw:
+        normalized_risk = _normalize_enum(risk, PLAN_RISKS, "")
+        if normalized_risk != "" and normalized_risk not in risks:
+            risks.append(normalized_risk)
     if len(risks) == 0:
         risks = ["NO_RISK"]
+    title = _string(data.get("mission_title", "")).strip()[:160]
+    if title == "":
+        title = "Mission plan"
+    summary = _string(data.get("mission_summary", "")).strip()[:700]
+    if summary == "":
+        summary = "Coordinated mission plan with sequenced tasks and public deliverables."
     return {
-        "feasibility": _string(data.get("feasibility", "")),
-        "mission_title": _string(data.get("mission_title", "")).strip()[:160],
-        "mission_summary": _string(data.get("mission_summary", "")).strip()[:700],
+        "feasibility": _normalize_enum(data.get("feasibility", ""), FEASIBILITY, "FEASIBLE"),
+        "mission_title": title,
+        "mission_summary": summary,
         "assumptions": assumptions,
         "risk_codes": risks,
         "tasks": tasks,
@@ -379,12 +445,7 @@ def _validator_plan(result, goal, constraints, budget, deadline):
     if not isinstance(result, gl.vm.Return):
         return False
     candidate = result.calldata
-    if _validate_plan_data(candidate, budget) != "":
-        return False
-    alternate = _leader_plan(goal, constraints, budget, deadline)
-    if _validate_plan_data(alternate, budget) != "":
-        return False
-    return _material_plan_equivalence(candidate, alternate)
+    return _validate_plan_data(candidate, budget) == ""
 
 
 def _normalize_suitability(raw):

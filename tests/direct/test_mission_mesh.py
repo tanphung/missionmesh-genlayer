@@ -160,6 +160,48 @@ def test_create_mission_stores_valid_dag(direct_vm, direct_deploy):
     assert final["is_final_integration"] is True
 
 
+def test_create_mission_repairs_llm_task_text_fields(direct_vm, direct_deploy):
+    contract = deploy_mesh(direct_vm, direct_deploy)
+    repaired_plan = {
+        **PLAN,
+        "feasibility": "ready",
+        "risk_codes": ["minor-format-risk", "NO_RISK"],
+        "tasks": [
+            {
+                **PLAN["tasks"][0],
+                "title": "",
+                "objective": "",
+                "skills": [],
+                "acceptance_criteria": [],
+                "deliverable_type": "UNEXPECTED",
+                "dependency_indexes": [99, -1, 0],
+                "budget_bps": 0,
+                "duration_hours": 0,
+                "is_final_integration": True,
+            },
+            {**PLAN["tasks"][1], "objective": "x" * 1200, "budget_bps": 0},
+            {**PLAN["tasks"][2], "budget_bps": 0, "is_final_integration": False},
+        ],
+    }
+    direct_vm.mock_llm("MissionMesh mission decomposition", as_json(repaired_plan))
+    direct_vm.value = BUDGET
+    mission_id = int(contract.create_mission("Build a launch page", "Use public artifacts.", FUTURE_DEADLINE))
+    direct_vm.value = 0
+
+    task_ids = load(contract.get_mission_task_ids(mission_id))
+    first = load(contract.get_task(task_ids[0]))
+    second = load(contract.get_task(task_ids[1]))
+    assert first["title"] == "Mission task 1"
+    assert first["objective"] != ""
+    assert first["skills"] == ["general execution"]
+    assert first["acceptance_criteria"] == ["Deliverable is complete, public, and matches the task objective."]
+    assert first["deliverable_type"] == "DOCUMENT"
+    assert first["duration_hours"] == 24
+    assert first["dependency_task_ids"] == []
+    assert len(second["objective"]) == 900
+    assert second["budget_cap"] == 30000
+
+
 def test_create_mission_rejects_invalid_inputs_and_bad_plan(direct_vm, direct_deploy):
     contract = deploy_mesh(direct_vm, direct_deploy)
     direct_vm.value = BUDGET

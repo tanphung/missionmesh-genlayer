@@ -124,17 +124,17 @@ const emptyTask: Task = {
 };
 
 const demoMissionGoal =
-  "Launch a public beta for AtlasOps, an AI-assisted operations dashboard for small logistics teams. The mission should produce market research, product positioning, a clickable UX prototype, a working responsive landing page, QA evidence, deployment notes, and a concise launch checklist for the founding team.";
+  "Launch a public beta for AtlasOps, an AI-assisted operations dashboard for small logistics teams. Produce research notes, positioning, UX prototype, landing page, QA evidence, deployment notes, and a launch checklist.";
 
 const demoMissionConstraints =
-  "Use English for all customer-facing copy. Keep the first release focused on shipment delay alerts, team handoff notes, and daily operations summaries. Deliver every artifact as a public URL. Do not include private credentials, paid API keys, or customer data. The final integration task must verify desktop and mobile readiness, link the source repository, link the live deployment, and summarize remaining risks.";
+  "Use English. Public URLs only. No private credentials. Final task must verify desktop and mobile readiness, source repository, live deployment, and remaining risks.";
 
 function demoDeadlineValue(): string {
   const date = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
   return date.toISOString().slice(0, 16);
 }
 
-const DEPLOYED_MISSION_MESH_ADDRESS = "0x144949Aa034c5f20f25Be57f7b5f2cc4964c5501" as Address;
+const DEPLOYED_MISSION_MESH_ADDRESS = "0x8A259D4273bC7b004e8b8d99EDD4Ee9be9EA03EE" as Address;
 const initialContractAddress = (import.meta.env.VITE_MISSION_MESH_ADDRESS || DEPLOYED_MISSION_MESH_ADDRESS) as Address;
 
 function asAddress(raw: string): Address {

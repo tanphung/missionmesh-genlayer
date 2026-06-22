@@ -1,0 +1,9 @@
+{
+  "network": "studionet",
+  "chainId": 61999,
+  "rpc": "https://studio.genlayer.com/api",
+  "missionMeshAddress": "0x8A259D4273bC7b004e8b8d99EDD4Ee9be9EA03EE",
+  "deploymentTransaction": "0x2620a31d10d9d9980ee65980b69bc59a8ab3af6dbefe684d21c05c49c77c5c1f",
+  "executionResult": "SUCCESS",
+  "deployedAt": "2026-06-22T16:17:04.546Z"
+}

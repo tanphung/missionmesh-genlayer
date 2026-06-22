@@ -31,6 +31,8 @@ const makeClient = createClient as unknown as (config: Record<string, unknown>) 
 const RECEIPT_RETRIES = 200;
 const RECEIPT_INTERVAL_MS = 3000;
 
+const sleepMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const discoveredWallets: EIP6963ProviderDetail[] = [];
 
 function recordWallet(detail?: EIP6963ProviderDetail) {
@@ -166,12 +168,25 @@ export async function connectWallet(): Promise<Address> {
 }
 
 export async function readContract<T>(address: Address, functionName: string, args: unknown[] = []): Promise<T> {
-  return (await readClient.readContract({
-    address,
-    functionName,
-    args,
-    stateStatus: "accepted"
-  })) as T;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return (await readClient.readContract({
+        address,
+        functionName,
+        args,
+        stateStatus: "accepted"
+      })) as T;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      if (!message.includes("server busy") && !message.includes("execution slots occupied")) {
+        throw error;
+      }
+      await sleepMs(1500 * (attempt + 1));
+    }
+  }
+  throw lastError;
 }
 
 export async function writeContract(

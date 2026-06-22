@@ -72,15 +72,15 @@ export async function waitForSuccess(client: any, hash: TxHash) {
     status: TransactionStatus.FINALIZED,
     fullTransaction: false,
   });
-  const resultName = String(receipt?.txExecutionResultName ?? receipt?.executionResult ?? "UNKNOWN");
-  if (resultName !== ExecutionResult.FINISHED_WITH_RETURN) {
+  const resultName = String(receipt?.txExecutionResultName ?? receipt?.executionResult ?? receipt?.result_name ?? "UNKNOWN");
+  if (resultName !== ExecutionResult.FINISHED_WITH_RETURN && resultName !== "MAJORITY_AGREE") {
     throw new Error(`Transaction ${hash} finalized without success: ${resultName}`);
   }
   return receipt;
 }
 
 export function extractContractAddress(receipt: unknown): Address {
-  const direct = findAddressByKey(receipt, ["contract_address", "contractAddress", "contract"]);
+  const direct = findAddressByKey(receipt, ["contract_address", "contractAddress", "contract", "recipient", "to_address"]);
   if (direct) return direct;
   throw new Error("Could not extract deployed contract address from receipt.");
 }

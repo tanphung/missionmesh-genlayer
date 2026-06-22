@@ -136,6 +136,19 @@ function demoDeadlineValue(): string {
 
 const DEPLOYED_MISSION_MESH_ADDRESS = "0x8A259D4273bC7b004e8b8d99EDD4Ee9be9EA03EE" as Address;
 const initialContractAddress = (import.meta.env.VITE_MISSION_MESH_ADDRESS || DEPLOYED_MISSION_MESH_ADDRESS) as Address;
+const RETIRED_MISSION_MESH_ADDRESSES = [
+  "0x144949aa034c5f20f25be57f7b5f2cc4964c5501",
+  "0x5fe9b3188128f3dc42e65371ac145f4afc236909",
+];
+
+function initialSavedContractAddress(): string {
+  const saved = window.localStorage.getItem("missionmesh.address") || "";
+  if (saved && !RETIRED_MISSION_MESH_ADDRESSES.includes(saved.toLowerCase())) {
+    return saved;
+  }
+  window.localStorage.setItem("missionmesh.address", initialContractAddress);
+  return initialContractAddress;
+}
 
 function asAddress(raw: string): Address {
   return raw.trim() as Address;
@@ -171,7 +184,7 @@ const sleepMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)
 
 export default function App() {
   const [contractAddress, setContractAddress] = useState<string>(() => {
-    return window.localStorage.getItem("missionmesh.address") || initialContractAddress || "";
+    return initialSavedContractAddress();
   });
   const [account, setAccount] = useState<Address | "">("");
   const [walletInstalled, setWalletInstalled] = useState(() => isWalletInstalled());
@@ -493,7 +506,23 @@ export default function App() {
       const expectedMissionId = config.next_mission_id;
       const hash = await writeContract(account, target, "create_mission", [goal, constraints, deadlineSeconds], budget);
       addTx({ hash, label: "Create mission", status: "submitted", detail: `Waiting for mission ${expectedMissionId}` });
-      showNotice("info", `Create mission submitted. Waiting for mission ${expectedMissionId} to appear.`);
+      showNotice("info", `Create mission submitted. Waiting for GenLayer consensus.`);
+      const receipt = await waitForAccepted(hash);
+      if (!executionSucceeded(receipt)) {
+        updateTx(hash, {
+          status: "failed",
+          ok: false,
+          detail: receiptDetail(receipt),
+        });
+        showNotice("error", `Create mission did not pass consensus. No mission was written. Tx: ${shortAddress(hash)}`);
+        return;
+      }
+      updateTx(hash, {
+        status: "accepted",
+        ok: true,
+        detail: `Consensus accepted. Loading mission ${expectedMissionId}`,
+      });
+      showNotice("info", `Consensus accepted. Loading mission ${expectedMissionId}.`);
 
       for (let attempt = 0; attempt < 120; attempt += 1) {
         await sleepMs(3000);

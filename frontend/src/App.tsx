@@ -28,7 +28,11 @@ import {
   debugTrace,
   executionSucceeded,
   explorerTxUrl,
+  getAccounts,
+  isOnGenLayerNetwork,
+  isWalletInstalled,
   readContract,
+  subscribeToWalletDiscovery,
   waitForFinalized,
   writeContract,
 } from "./lib/genlayer";
@@ -173,6 +177,8 @@ export default function App() {
     return window.localStorage.getItem("missionmesh.address") || initialContractAddress || "";
   });
   const [account, setAccount] = useState<Address | "">("");
+  const [walletInstalled, setWalletInstalled] = useState(() => isWalletInstalled());
+  const [walletNetworkOk, setWalletNetworkOk] = useState(false);
   const [notice, setNotice] = useState<Notice>({ tone: "info", text: "Configure a Studio contract address, then load protocol state." });
   const [busy, setBusy] = useState<string>("");
   const [protocol, setProtocol] = useState<ProtocolConfig | null>(null);
@@ -343,6 +349,8 @@ export default function App() {
     try {
       const connected = await connectWallet();
       setAccount(connected);
+      setWalletInstalled(true);
+      setWalletNetworkOk(await isOnGenLayerNetwork());
       showNotice("success", `Connected ${shortAddress(connected)}.`);
     } catch (error) {
       showNotice("error", error instanceof Error ? error.message : "Could not connect wallet.");
@@ -459,6 +467,44 @@ export default function App() {
     }
   }, [contractReady, loadTaskContext, selectedTaskId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const syncWallet = async () => {
+      const installed = isWalletInstalled();
+      const accounts = await getAccounts();
+      const networkOk = await isOnGenLayerNetwork();
+      if (cancelled) return;
+      setWalletInstalled(installed);
+      setWalletNetworkOk(networkOk);
+      if (accounts[0]) {
+        setAccount(accounts[0]);
+      }
+    };
+    void syncWallet();
+    const unsubscribeDiscovery = subscribeToWalletDiscovery(() => {
+      setWalletInstalled(isWalletInstalled());
+    });
+    const handleAccountsChanged = (accounts: unknown) => {
+      const next = Array.isArray(accounts) ? (accounts[0] as Address | undefined) : undefined;
+      setAccount(next ?? "");
+      if (next) {
+        showNotice("success", `Connected ${shortAddress(next)}.`);
+      }
+    };
+    const handleChainChanged = async () => {
+      setWalletNetworkOk(await isOnGenLayerNetwork());
+    };
+    const provider = window.ethereum;
+    provider?.on?.("accountsChanged", handleAccountsChanged);
+    provider?.on?.("chainChanged", handleChainChanged);
+    return () => {
+      cancelled = true;
+      unsubscribeDiscovery();
+      provider?.removeListener?.("accountsChanged", handleAccountsChanged);
+      provider?.removeListener?.("chainChanged", handleChainChanged);
+    };
+  }, [showNotice]);
+
   return (
     <main className="shell">
       <section className="topbar">
@@ -473,7 +519,7 @@ export default function App() {
           </button>
           <button className="primaryButton" onClick={connect} disabled={busy !== ""} title="Connect wallet">
             <Wallet />
-            {account ? shortAddress(account) : "Connect"}
+            {account ? shortAddress(account) : walletInstalled ? "Connect" : "Install wallet"}
           </button>
         </div>
       </section>
@@ -503,6 +549,7 @@ export default function App() {
 
       <section className="metricGrid">
         <Metric icon={<Network />} label="Network" value={import.meta.env.VITE_GENLAYER_NETWORK || "studionet"} />
+        <Metric icon={<Wallet />} label="Wallet" value={account ? (walletNetworkOk ? "Connected" : "Wrong network") : walletInstalled ? "Ready" : "Not found"} />
         <Metric icon={<ShieldCheck />} label="Protocol fee" value={protocol ? `${protocol.protocol_fee_bps} bps` : "Not loaded"} />
         <Metric icon={<CircleDollarSign />} label="Minimum budget" value={protocol ? formatWei(protocol.minimum_mission_budget) : "Not loaded"} />
         <Metric icon={<GitBranch />} label="Next IDs" value={protocol ? `M${protocol.next_mission_id} / T${protocol.next_task_id}` : "Not loaded"} />
